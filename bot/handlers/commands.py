@@ -6,10 +6,10 @@ from aiogram.utils.markdown import hbold, hitalic
 
 from bot.keyboards.reply import main_menu_kb, BTN_NEW_TASK, BTN_MY_LIST
 from bot.handlers.states import TaskCreation
+from services.persistence import TaskRepository
 
 router = Router()
-
-# ---------- General Handlers ----------
+task_repo = TaskRepository() # Rule 11: Persistent instance
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
@@ -17,7 +17,7 @@ async def cmd_start(message: Message):
     await message.answer(
         f"Welcome to {hbold('Mister Todo')}!\n\nUse the buttons below to manage your tasks.",
         reply_markup=keyboard,
-        parse_mode="HTML"
+        parse_mode="HTML" # Rule 13: Consistent HTML parsing
     )
 
 @router.message(F.text == BTN_NEW_TASK)
@@ -32,19 +32,40 @@ async def cmd_newtask(message: Message, state: FSMContext):
 @router.message(F.text == BTN_MY_LIST)
 @router.message(Command("list"))
 async def cmd_list(message: Message):
-    """Rule 4: Moved above fallback so it actually triggers."""
+    """Rule 4: Fetches and lists user tasks (Durable Retrieval)."""
+    tasks = task_repo.get_tasks(user_id=message.from_user.id)
+    
+    if not tasks:
+        await message.answer(
+            f"📋 Your task list is empty. Use {hbold(BTN_NEW_TASK)} to start.",
+            reply_markup=main_menu_kb(),
+            parse_mode="HTML"
+        )
+        return
+    
+    task_lines = []
+    for task in tasks:
+        # Rule 12: Safe formatting for output
+        task_lines.append(
+            f"🆔 {task['id']} - {hbold(task['name'])}\n"
+            f"📝 {hitalic(task['description'])}\n"
+            f"⏰ Due: {task['due_date']}\n"
+            f"----------------------------------"
+        )
+    
     await message.answer(
-        f"{hbold('📋 Your Tasks')}\n\nYour list is currently empty. Use the {hbold(BTN_NEW_TASK)} button to add one!",
+        f"📋 {hbold('Your Tasks:')}\n\n" + "\n".join(task_lines),
+        reply_markup=main_menu_kb(),
         parse_mode="HTML"
     )
 
-# ---------- FSM Flow Handlers (Rule 1) ----------
+# ---------- FSM Flow (Rule 1) ----------
 
 @router.message(TaskCreation.name)
 async def process_task_name(message: Message, state: FSMContext):
     task_name = message.text.strip()
     if not task_name:
-        await message.answer("❗ Task name cannot be empty. Please enter a valid name:")
+        await message.answer("❗ Task name cannot be empty:")
         return
 
     await state.update_data(name=task_name)
@@ -75,7 +96,15 @@ async def process_task_due_date(message: Message, state: FSMContext):
         due_date = message.text.strip()
     
     user_data = await state.get_data()
-    
+
+    # Rule 2: Save to Durable Storage
+    task_repo.add_task(
+        user_id=message.from_user.id,
+        name=user_data['name'],
+        description=user_data['description'],
+        due_date=due_date
+    )
+
     response = (
         f"🎯 {hbold('Task Created Successfully!')}\n\n"
         f"📌 {hbold(user_data['name'])}\n"
@@ -86,14 +115,13 @@ async def process_task_due_date(message: Message, state: FSMContext):
     await message.answer(response, parse_mode="HTML", reply_markup=main_menu_kb())
     await state.clear()
 
-# ---------- Fallback Handler (Rule 4: ALWAYS LAST) ----------
+# ---------- Fallback (ALWAYS LAST) ----------
 
 @router.message(F.text)
 async def fallback_message(message: Message):
-    keyboard = main_menu_kb()
     await message.answer(
         "I didn't quite catch that. Please use the buttons below to navigate.",
-        reply_markup=keyboard
+        reply_markup=main_menu_kb()
     )
 
 # Love From Mister
