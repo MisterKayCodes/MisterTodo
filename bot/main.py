@@ -4,6 +4,7 @@ import sys
 import os
 from dotenv import load_dotenv
 from aiogram import Bot, Dispatcher
+from aiogram.fsm.storage.memory import MemoryStorage
 
 from bot.handlers import commands
 
@@ -28,7 +29,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 bot = Bot(token=TOKEN)
-dp = Dispatcher()
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
 dp.include_router(commands.router)
 
