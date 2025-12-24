@@ -4,7 +4,7 @@ from aiogram.filters.command import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.markdown import hbold, hitalic
 
-from bot.keyboards.reply import main_menu_kb, BTN_NEW_TASK
+from bot.keyboards.reply import main_menu_kb, BTN_NEW_TASK, BTN_MY_LIST
 from bot.handlers.states import TaskCreation
 
 router = Router()
@@ -13,7 +13,6 @@ router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    """Rule 4: Explicit welcome message."""
     keyboard = main_menu_kb()
     await message.answer(
         f"Welcome to {hbold('Mister Todo')}!\n\nUse the buttons below to manage your tasks.",
@@ -21,21 +20,28 @@ async def cmd_start(message: Message):
         parse_mode="HTML"
     )
 
-@router.message(F.text == BTN_NEW_TASK) # Rule 6: Handle button click
+@router.message(F.text == BTN_NEW_TASK)
 @router.message(Command("newtask"))
 async def cmd_newtask(message: Message, state: FSMContext):
-    """Rule 1: Entry into the Known State 'TaskCreation'."""
     await state.set_state(TaskCreation.name)
     await message.answer(
         "📝 Please enter the name of your new task:",
         reply_markup=ReplyKeyboardRemove()
     )
 
-# ---------- FSM Flow Handlers (Rule 1: Transitions) ----------
+@router.message(F.text == BTN_MY_LIST)
+@router.message(Command("list"))
+async def cmd_list(message: Message):
+    """Rule 4: Moved above fallback so it actually triggers."""
+    await message.answer(
+        f"{hbold('📋 Your Tasks')}\n\nYour list is currently empty. Use the {hbold(BTN_NEW_TASK)} button to add one!",
+        parse_mode="HTML"
+    )
+
+# ---------- FSM Flow Handlers (Rule 1) ----------
 
 @router.message(TaskCreation.name)
 async def process_task_name(message: Message, state: FSMContext):
-    """Step 1: Capture Name."""
     task_name = message.text.strip()
     if not task_name:
         await message.answer("❗ Task name cannot be empty. Please enter a valid name:")
@@ -51,8 +57,6 @@ async def process_task_name(message: Message, state: FSMContext):
 @router.message(TaskCreation.description, Command("skip"))
 @router.message(TaskCreation.description)
 async def process_task_desc(message: Message, state: FSMContext):
-    """Step 2: Capture Description or /skip (Rule 6)."""
-    # Detect if user sent /skip command explicitly
     if (message.text and message.text.startswith('/skip')) or message.text.lower() == "none":
         description = "No description provided."
     else:
@@ -65,7 +69,6 @@ async def process_task_desc(message: Message, state: FSMContext):
 @router.message(TaskCreation.due_date, Command("skip"))
 @router.message(TaskCreation.due_date)
 async def process_task_due_date(message: Message, state: FSMContext):
-    """Step 3: Capture Due Date and Finalize (Rule 4)."""
     if (message.text and message.text.startswith('/skip')) or message.text.lower() == "none":
         due_date = "No deadline"
     else:
@@ -73,7 +76,6 @@ async def process_task_due_date(message: Message, state: FSMContext):
     
     user_data = await state.get_data()
     
-    # Rule 12: Safe HTML Response
     response = (
         f"🎯 {hbold('Task Created Successfully!')}\n\n"
         f"📌 {hbold(user_data['name'])}\n"
@@ -82,15 +84,12 @@ async def process_task_due_date(message: Message, state: FSMContext):
     )
     
     await message.answer(response, parse_mode="HTML", reply_markup=main_menu_kb())
-    
-    # Rule 1: Finish flow and return to unknown state
     await state.clear()
 
-# ---------- Fallback Handler ----------
+# ---------- Fallback Handler (Rule 4: ALWAYS LAST) ----------
 
 @router.message(F.text)
 async def fallback_message(message: Message):
-    """Rule 4: Explicit fallback for unhandled text."""
     keyboard = main_menu_kb()
     await message.answer(
         "I didn't quite catch that. Please use the buttons below to navigate.",
