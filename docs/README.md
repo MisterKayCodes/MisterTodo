@@ -2,24 +2,43 @@
 
 ## Overview
 
-Mister_Todo is a lightweight, resilient Telegram bot designed to manage your tasks with minimal effort.  
-It provides a simple, “lazy-person” UI with permanent reply keyboards and inline buttons, allowing you to create, track, and complete tasks without typing complex commands.  
+Mister_Todo is a lightweight, resilient Telegram bot designed to manage your tasks with minimal effort.
+It provides a simple, “lazy-person” UI with permanent reply keyboards and inline buttons, allowing you to create, track, and complete tasks without typing complex commands.
 
-Built with scalability and maintainability in mind, Mister_Todo follows strict architectural rules inspired by the [Level-Up Dev Rulebook (2025 Edition)](./docs/LEVEL_UP_RULEBOOK.md). This ensures reliability, clear state management, and seamless updates.
-
+Built with scalability and maintainability in mind, Mister_Todo follows strict architectural rules inspired by the Level-Up Dev Rulebook (2025 Edition)
+. This ensures reliability, clear state management, and seamless updates.
 ---
 
 ## Features
 
-- **Permanent Reply Keyboard:** Quick access to [➕ New Task], [📋 My List], [📊 Habit Stats], and [⏱️ Active Timer].
-- **Inline Task Controls:** Mark tasks done, add time, or delete with a single tap.
-- **Robust State Management:** Using Aiogram’s FSM to track input states.
-- **Durable Storage:** SQLite backend ensures all tasks and logs are safely persisted.
-- **Habit Tracking:** Simple consistency scores to encourage daily productivity.
-- **Safe Deployments:** Automated backups and rollback protocols to protect your data.
-- **Lazy-User Friendly:** Minimal typing, emoji-rich feedback, and forgiving logic.
 
----
+Permanent Reply Keyboard: Quick access to [➕ New Task], [📋 My List], [📊 Habit Stats], and [⏱️ Active Timer (to be replaced)].
+
+Inline Task Controls: Mark tasks done, add time manually, delete with a single tap.
+
+Robust State Management: Using Aiogram’s FSM to track input states.
+
+Durable Storage: SQLite backend ensures all tasks and logs are safely persisted.
+
+Habit Tracking & Productivity:
+
+Daily/weekly completion summaries with progress bars and streak highlights.
+
+Scrollable timeline view of completed tasks with timestamps.
+
+Filtering and searching completed tasks by date, tags, priority, or project.
+
+Export completed tasks as CSV files.
+
+Reward milestones with badges and emoji feedback.
+
+Manual time logging and Pomodoro-style focus sessions planned to replace the current active timer.
+
+Idle reminders and task priority/urgency meters to enhance productivity without overwhelming users.
+
+Safe Deployments: Automated backups and rollback protocols to protect your data.
+
+Lazy-User Friendly: Minimal typing, emoji-rich feedback, forgiving logic, and explicit commands only.
 
 ## Project Structure
 
@@ -30,27 +49,30 @@ Mister_Todo/
 ├── bot/                        # Telegram bot application layer
 │   ├── main.py                 # Bot startup and event loop
 │   ├── handlers/               # Command and callback handlers
+│   │   ├── commands.py         # Add handlers for new task, list, habit stats, filters, export, reset
+│   │   ├── callbacks.py        # Handle inline buttons: mark done, delete, filter navigation, export triggers
+│   │   └── states.py           # FSM states including new filtering and export flows
 │   ├── middlewares/            # Safety filters and error handling
-│   ├── keyboards/              # Reply and inline keyboards
-│   └── utils.py                # Helper functions
+│   ├── keyboards/              # Reply and inline keyboards (habit stats menu, timeline navigation)
+│   └── utils.py                # Helper functions (e.g., CSV generation)
 │
 ├── services/                   # Core business logic separate from bot API
 │   ├── task_manager.py         # Task CRUD and idempotency
-│   ├── stats.py                # Habit tracking logic
-│   ├── scheduler.py            # Timer and scheduling logic
-│   ├── persistence.py          # SQLite database abstraction
+│   ├── stats.py                # Habit tracking, streak calculation, filtering, milestones, export logic
+│   ├── scheduler.py            # Timer and Pomodoro session management (planned replacement for active timer)
+│   ├── persistence.py          # SQLite database abstraction with completed task history
 │   └── validation.py           # Input sanitization and security
 │
 ├── storage/                    # Data persistence and logs
-│   ├── db/                    # SQLite file and migrations
+│   ├── db/                     # SQLite file and migrations (add tables/columns for tags, priority, projects)
 │   ├── logs/                   # Rotating log files
 │   └── backups/                # Automated database backups
 │
 ├── config/                     # Environment and constant configurations
 │
-├── tests/                      # Automated tests for core logic
+├── tests/                      # Automated tests for task, stats, scheduler, and export features
 │
-├── docs/                       # Documentation, including this README
+├── docs/                       # Documentation, including this README and Level-Up Rulebook
 │
 ├── requirements.txt            # Pinned dependencies
 ├── .env.example                # Environment variable template
@@ -117,6 +139,24 @@ Please refer to [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for detailed deployment st
 * Rollback procedures in case of failure
 
 ---
+
+# Planned Work (Upcoming Features)
+
+Replace the Active Timer with a Pomodoro Timer and Manual Time Logging for tasks (services/scheduler.py and related handlers).
+
+Implement comprehensive Habit Stats functionality:
+
+Daily/weekly completion summaries with progress bars and streak highlights (services/stats.py, bot/handlers/commands.py, bot/keyboards/).
+
+Scrollable, paginated timeline views and filtering FSM (bot/handlers/states.py).
+
+Task filtering and searching by date, tags, priority, project (services/stats.py, bot/handlers/callbacks.py).
+
+CSV export of completed tasks (bot/utils.py).
+
+Reward milestones with badge/emoji notifications (services/stats.py).
+
+Idle reminders and task priority/urgency meter enhancements (bot/middlewares/, services/task_manager.py).
 
 ## Contributing
 
