@@ -1,183 +1,108 @@
-# Mister_Todo — Your Personal Telegram To-Do Bot
-
-## Overview
-
-Mister_Todo is a lightweight, resilient Telegram bot designed to manage your tasks with minimal effort.
-It provides a simple, “lazy-person” UI with permanent reply keyboards and inline buttons, allowing you to create, track, and complete tasks without typing complex commands.
-
-Built with scalability and maintainability in mind, Mister_Todo follows strict architectural rules inspired by the Level-Up Dev Rulebook (2025 Edition)
-. This ensures reliability, clear state management, and seamless updates.
----
-
-## Features
+🚀 Mister_Todo — Your Personal Telegram Productivity Engine
 
 
-Permanent Reply Keyboard: Quick access to [➕ New Task], [📋 My List], [📊 Habit Stats], and [⏱️ Active Timer (to be replaced)].
+📖 Overview
+Mister_Todo is a resilient, senior-architected Telegram bot designed for high-performance task management with a "lazy-user" interface. Unlike standard to-do apps, Mister_Todo is built on the Level-Up Dev Rulebook (2025 Edition), ensuring that the system is always in a known state, handles errors explicitly, and persists data with 100% reliability.
 
-Inline Task Controls: Mark tasks done, add time manually, delete with a single tap.
+Whether you are tracking daily habits, classifying work by priority, or exporting productivity reports, Mister_Todo manages the complexity so you don't have to.
 
-Robust State Management: Using Aiogram’s FSM to track input states.
 
-Durable Storage: SQLite backend ensures all tasks and logs are safely persisted.
+✨ Key Features (2025 Edition)
 
-Habit Tracking & Productivity:
+🧠 Smart Date Parsing: Powered by dateparser. Type "next Friday," "20th Dec," or "tomorrow," and the bot automatically interprets and stores the correct ISO date.
 
-Daily/weekly completion summaries with progress bars and streak highlights.
+📊 Habit Stats & Streaks: Real-time analytics including daily goal progress bars (visual "Lvl" meters) and "🔥 Streak" tracking.
 
-Scrollable timeline view of completed tasks with timestamps.
+📜 Paginated Archive: A clean, historical view of all completed tasks. Flip through your history using [Prev] and [Next] buttons without cluttering your chat.
 
-Filtering and searching completed tasks by date, tags, priority, or project.
+📂 Time-Series Classification: Instantly filter your archive to see what you finished Today, this Week, or this Month.
 
-Export completed tasks as CSV files.
+⚖️ Priority-First Workflow: Every task is classified by priority (🔴 High, 🟡 Medium, 🟢 Low) during creation to help you focus on what matters.
 
-Reward milestones with badges and emoji feedback.
+📑 One-Click CSV Export: Export your entire completion history into a professionally formatted CSV file, grouped by date.
 
-Manual time logging and Pomodoro-style focus sessions planned to replace the current active timer.
+🛡️ Resilient Architecture: Built to survive crashes. FSM states and database migrations ensure your data is safe even after a reboot.
 
-Idle reminders and task priority/urgency meters to enhance productivity without overwhelming users.
 
-Safe Deployments: Automated backups and rollback protocols to protect your data.
-
-Lazy-User Friendly: Minimal typing, emoji-rich feedback, forgiving logic, and explicit commands only.
-
-## Project Structure
-
-```
-
+🏗️ Project Structure
+Mister_Todo follows a Service-Oriented Architecture (SOA) to keep the bot UI separate from the core business logic.
+text
 Mister_Todo/
-│
-├── bot/                        # Telegram bot application layer
-│   ├── main.py                 # Bot startup and event loop
-│   ├── handlers/               # Command and callback handlers
-│   │   ├── commands.py         # Add handlers for new task, list, habit stats, filters, export, reset
-│   │   ├── callbacks.py        # Handle inline buttons: mark done, delete, filter navigation, export triggers
-│   │   └── states.py           # FSM states including new filtering and export flows
-│   ├── middlewares/            # Safety filters and error handling
-│   ├── keyboards/              # Reply and inline keyboards (habit stats menu, timeline navigation)
-│   └── utils.py                # Helper functions (e.g., CSV generation)
-│
-├── services/                   # Core business logic separate from bot API
-│   ├── task_manager.py         # Task CRUD and idempotency
-│   ├── stats.py                # Habit tracking, streak calculation, filtering, milestones, export logic
-│   ├── scheduler.py            # Timer and Pomodoro session management (planned replacement for active timer)
-│   ├── persistence.py          # SQLite database abstraction with completed task history
-│   └── validation.py           # Input sanitization and security
-│
-├── storage/                    # Data persistence and logs
-│   ├── db/                     # SQLite file and migrations (add tables/columns for tags, priority, projects)
-│   ├── logs/                   # Rotating log files
-│   └── backups/                # Automated database backups
-│
-├── config/                     # Environment and constant configurations
-│
-├── tests/                      # Automated tests for task, stats, scheduler, and export features
-│
-├── docs/                       # Documentation, including this README and Level-Up Rulebook
-│
-├── requirements.txt            # Pinned dependencies
-├── .env.example                # Environment variable template
-├── .gitignore                  # Files and folders ignored by Git
-└── LICENSE                    # Project license (optional)
+├── bot/                        # 📱 Telegram UI Layer (aiogram)
+│   ├── main.py                 # System entry point & router registration
+│   ├── utils.py                # Messy date normalization (NLP)
+│   ├── handlers/               
+│   │   ├── commands.py         # Entry points (Menus & FSM starts)
+│   │   ├── callbacks.py        # Interactions (Done, Delete, Pagination, Export)
+│   │   └── states.py           # Finite State Machine definitions
+│   └── keyboards/              
+│       ├── reply.py            # Primary navigation menu
+│       └── inline.py           # Task-specific & Archive buttons
+├── services/                   # ⚙️ Business Logic Tier (The "Brain")
+│   ├── task_manager.py         # Task lifecycle, CSV generation, & filtering
+│   ├── stats.py                # Productivity math, streaks, & progress bars
+│   └── persistence.py          # SQLite Abstraction & Idempotent Migrations
+├── storage/                    # 💾 Durable Persistence
+│   ├── db/                     # SQLite database files
+│   ├── exports/                # Generated CSV reports
+│   └── logs/                   # Detailed system heartbeats
+└── .env                        # Secrets & Tokens (Pinned)
 
-````
 
----
+🛠️ Setup Instructions
+1. Clone & Environment
 
-## Setup Instructions
+bash
+git clone github.com
+cd Mister_Todo
+python -m venv venv
+source venv/bin/activate  # Windows: venv\Scripts\activate
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/yourusername/Mister_Todo.git
-   cd Mister_Todo
-````
 
-2. **Create and activate a virtual environment:**
+2. Install Dependencies
 
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+bash
+pip install aiogram python-dotenv dateparser
 
-3. **Install dependencies:**
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+3. Configuration
 
-4. **Configure environment variables:**
+Create a .env file in the root directory:
+env
+BOT_TOKEN=your_telegram_bot_token_here
 
-   * Copy `.env.example` to `.env`
-   * Add your Telegram Bot Token and other secrets
 
-5. **Run the bot:**
+4. Run the Engine
 
-   ```bash
-   python -m bot.main
-   ```
+bash
+python -m bot.main
 
----
 
-## Development Guidelines
+📐 The Senior Rulebook (Rules We Follow)
 
-* Follow the [Level-Up Dev Rulebook (2025 Edition)](./docs/LEVEL_UP_RULEBOOK.md) strictly.
-* Write **explicit, idempotent, and readable code**.
-* Use **SQLite for all persistent state**.
-* Always **write tests** for new features.
-* Log all significant events and errors for observability.
-* Keep the **UI simple and lazy-user friendly**.
-* No “smart guessing” — every user action must be explicit.
+This project strictly adheres to the Level-Up Dev Rulebook:
+Rule 1 (Known State): The system never "guesses." Every action results in an explicit state change.
+Rule 3 (Single Responsibility): Each file does one job. persistence.py handles the DB; callbacks.py handles buttons.
+Rule 11 (Separation of Logic): You can change the Telegram Bot for a Web App, and the services/ logic would stay exactly the same.
+Rule 13 (2025 Standards): Uses timezone-aware UTC timestamps and class-based Bot properties.
 
----
+📈 Planned Roadmap
+Paginated Archive & Navigation
+Natural Language Date Parsing
+Priority Selection Workflow
+Weekly/Monthly Data Classification
+Idle Reminders: Friendly nudges if you have been inactive (Phase 5).
+Manual Time Logging: Track exactly how many hours a task took.
+Multi-Project Support: Grouping tasks by specific work streams.
 
-## Deployment & Updates
 
-Please refer to [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for detailed deployment steps including:
+🤝 Contact
+Maintained by Mister Kay
 
-* Automated backups before updates
-* Graceful shutdowns and restarts
-* Monitoring logs and metrics
-* Rollback procedures in case of failure
 
----
 
-# Planned Work (Upcoming Features)
+Junior devs focus on making it work. Senior devs focus on making it last.
 
-Replace the Active Timer with a Pomodoro Timer and Manual Time Logging for tasks (services/scheduler.py and related handlers).
 
-Implement comprehensive Habit Stats functionality:
-
-Daily/weekly completion summaries with progress bars and streak highlights (services/stats.py, bot/handlers/commands.py, bot/keyboards/).
-
-Scrollable, paginated timeline views and filtering FSM (bot/handlers/states.py).
-
-Task filtering and searching by date, tags, priority, project (services/stats.py, bot/handlers/callbacks.py).
-
-CSV export of completed tasks (bot/utils.py).
-
-Reward milestones with badge/emoji notifications (services/stats.py).
-
-Idle reminders and task priority/urgency meter enhancements (bot/middlewares/, services/task_manager.py).
-
-## Contributing
-
-For now, Mister_Todo is a personal project. Contributions are welcome by pull request with clear, atomic commits respecting the architecture and coding standards.
-
----
-
-## License
-
-[   ]
-
----
-
-## Contact
-
-For questions or support, reach out to the maintainer.
-
----
-
-```
-
----
-
+Love From Mister
 

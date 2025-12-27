@@ -1,60 +1,39 @@
-from aiogram import Router, F, types
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from aiogram import Router, F
+from aiogram.types import Message, ReplyKeyboardRemove
 from aiogram.filters.command import Command
-from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.markdown import hbold, hitalic
 
-from bot.keyboards.reply import main_menu_kb, BTN_NEW_TASK, BTN_MY_LIST
-from bot.handlers.states import TaskCreation  # Ensure TaskCreation has a 'priority' state
+# Rule 3: Separation of UI Components
+from bot.keyboards.reply import main_menu_kb, BTN_NEW_TASK, BTN_MY_LIST, BTN_STATS, BTN_ARCHIVE
+from bot.keyboards.inline import task_inline_kb, build_priority_kb, build_archive_kb
+from bot.handlers.states import TaskCreation
+from bot.utils import normalize_date 
 
-# Rule 11: Only import the Manager, not the Repo
 from services.task_manager import TaskManager
 from services.stats import HabitStats
 
 router = Router()
-task_manager = TaskManager()  # Use the manager, not the repo (Rule 3)
+task_manager = TaskManager()
 
-# --- Keyboards ---
-
-def build_task_inline_kb(task_id: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="✅ Done", callback_data=f"done:{task_id}"),
-            InlineKeyboardButton(text="🗑️ Delete", callback_data=f"delete:{task_id}")
-        ]
-    ])
-
-def build_priority_kb() -> InlineKeyboardMarkup:
-    """Rule 6: Explicit priority selection."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="🟢 Low", callback_data="prio:Low"),
-            InlineKeyboardButton(text="🟡 Medium", callback_data="prio:Medium"),
-            InlineKeyboardButton(text="🔴 High", callback_data="prio:High")
-        ]
-    ])
-
-# --- Handlers ---
+# --- Navigation Handlers ---
 
 @router.message(Command("start"))
 async def cmd_start(message: Message):
+    """Rule 1: Bootstrapping user into a known system state."""
     await message.answer(
         f"Welcome to {hbold('Mister Todo')}!\n\nUse the buttons below to manage your tasks.",
-        reply_markup=main_menu_kb(),
-        parse_mode="HTML"
+        reply_markup=main_menu_kb()
     )
 
-@router.message(F.text == "📊 Habit Stats") # Assuming this BTN exists in your main_menu_kb
+@router.message(F.text == BTN_STATS)
 @router.message(Command("habitstats"))
 async def cmd_habitstats(message: Message):
-    """Phase 3: The Habit Stats Summary UI."""
+    """Phase 3: Productivity Logic & Metrics."""
     stats = HabitStats(user_id=message.from_user.id, task_manager=task_manager)
-    
     streak = stats.get_current_streak()
     progress = stats.get_progress_stats()
     
-    # Rule 8: Visual Progress Bar (Boring but effective)
     filled = int(progress['percent'] * 10)
     bar = "🟩" * filled + "⬜" * (10 - filled)
 
@@ -65,29 +44,28 @@ async def cmd_habitstats(message: Message):
         f"Lvl: [{bar}] {int(progress['percent']*100)}%\n\n"
         f"{'🌟 Goal Achieved!' if progress['is_goal_reached'] else 'Keep pushing! 🚀'}"
     )
-    await message.answer(response, parse_mode="HTML")
+    await message.answer(response)
 
 @router.message(F.text == BTN_MY_LIST)
 @router.message(Command("list"))
 async def cmd_list(message: Message):
-    # Rule 11: Using TaskManager returns a list of Task objects
+    """Rule 11: Displaying active durable state."""
     tasks = task_manager.get_tasks(user_id=message.from_user.id)
-
     if not tasks:
         await message.answer("📋 Your list is empty.", reply_markup=main_menu_kb())
         return
 
     for task in tasks:
-        # Now we can use task.priority and task.name safely
         prio_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(task.priority, "⚪")
         text = (
             f"{prio_emoji} {hbold(task.name)}\n"
             f"📝 {hitalic(task.description or 'No description')}\n"
             f"⏰ Due: {task.due_date}"
         )
-        await message.answer(text, reply_markup=build_task_inline_kb(task.id), parse_mode="HTML")
+        # Using centralized inline builder
+        await message.answer(text, reply_markup=task_inline_kb(task.id))
 
-# --- Task Creation FSM with Priority ---
+# --- Task Creation FSM ---
 
 @router.message(F.text == BTN_NEW_TASK)
 async def cmd_newtask(message: Message, state: FSMContext):
@@ -105,31 +83,41 @@ async def process_description(message: Message, state: FSMContext):
     desc = message.text if message.text != "/skip" else "No description"
     await state.update_data(description=desc)
     await state.set_state(TaskCreation.due_date)
-    await message.answer("📅 Enter due date (or /skip):")
+    await message.answer("📅 When is this due? (e.g., 'tomorrow', '20th Dec', or /skip):")
 
 @router.message(TaskCreation.due_date)
 async def process_due_date(message: Message, state: FSMContext):
-    due = message.text if message.text != "/skip" else "No deadline"
-    await state.update_data(due_date=due)
+    """Rule 6: Normalizing user intent into predictable data."""
+    raw_date = message.text.strip()
+    clean_date = normalize_date(raw_date)
     
-    # NEW STEP: Rule 6 - Explicit Priority Selection
+    await state.update_data(due_date=clean_date)
     await state.set_state(TaskCreation.priority)
-    await message.answer("⚖️ Select Task Priority:", reply_markup=build_priority_kb())
-
-@router.callback_query(TaskCreation.priority, F.data.startswith("prio:"))
-async def process_priority(callback: CallbackQuery, state: FSMContext):
-    priority = callback.data.split(":")[1]
-    data = await state.get_data()
     
-    # Finalize creation via Manager
-    task_manager.add_task(
-        user_id=callback.from_user.id,
-        name=data['name'],
-        description=data['description'],
-        due_date=data['due_date'],
-        priority=priority
+    # Using centralized inline builder
+    await message.answer(
+        f"📅 Date interpreted as: {hbold(clean_date)}\n\n⚖️ Select Task Priority:", 
+        reply_markup=build_priority_kb()
     )
-    
-    await callback.message.edit_text(f"✅ Task {hbold(data['name'])} created with {priority} priority!")
-    await callback.message.answer("What's next?", reply_markup=main_menu_kb())
-    await state.clear()
+
+# --- Archive Handler ---
+
+@router.message(F.text == BTN_ARCHIVE)
+@router.message(Command("archive"))
+async def cmd_archive(message: Message):
+    """Phase 4: Entry point for Historical Archive View."""
+    user_id = message.from_user.id
+    completed_tasks = task_manager.get_archive(user_id, page=0)
+
+    if not completed_tasks:
+        await message.answer("Your archive is empty. Finish some tasks first! 🚀")
+        return
+
+    has_more = len(completed_tasks) >= 10
+    response = f"📜 {hbold('Completed Tasks Archive (P1)')}\n\n"
+    for task in completed_tasks:
+        done_date = task.completed_at[:10] if task.completed_at else "---"
+        response += f"✅ {task.name} — {hitalic(done_date)}\n"
+
+    # Using centralized inline builder
+    await message.answer(response, reply_markup=build_archive_kb(0, has_more))

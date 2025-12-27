@@ -1,6 +1,11 @@
+import logging
+import csv
+import os
+
+from aiogram.types import FSInputFile
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional, Any
-import logging
+
 
 # Rule 10: Observability
 logger = logging.getLogger(__name__)
@@ -105,3 +110,17 @@ class HabitStats:
             "percent": min(done_today / self.daily_goal, 1.0),
             "is_goal_reached": done_today >= self.daily_goal
         }
+
+
+    def generate_task_csv(user_id: int, tasks: list) -> str:
+        """Rule 2: Export durable state to a portable CSV format."""
+        file_path = f"storage/exports/tasks_{user_id}.csv"
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        
+        with open(file_path, mode='w', newline='', encoding='utf-8') as file:
+            writer = csv.writer(file)
+            writer.writerow(["Task Name", "Status", "Completed At", "Priority"])
+            for task in tasks:
+                writer.writerow([task.name, "Completed", task.completed_at, task.priority])
+        
+        return file_path
