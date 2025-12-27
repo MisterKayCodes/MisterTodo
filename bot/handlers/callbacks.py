@@ -1,53 +1,53 @@
-from aiogram import Router
+from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.utils.markdown import hbold
 
-from bot.keyboards.inline import task_inline_kb
-from services.persistence import TaskRepository
+# Rule 11: Use Manager and Stats, not raw Repo
+from services.task_manager import TaskManager
+from services.stats import HabitStats
 
 router = Router()
-task_repo = TaskRepository()
+task_manager = TaskManager()
 
-
-@router.callback_query(lambda c: c.data and c.data.startswith("done:"))
+@router.callback_query(F.data.startswith("done:"))
 async def callback_done_handler(callback: CallbackQuery):
-    # Extract task_id from callback data
-    task_id_str = callback.data.split(":")[1]
-    if not task_id_str.isdigit():
-        await callback.answer("Invalid task ID.", show_alert=True)
-        return
+    """Rule 1: Transitions task to completed state and triggers stats update."""
+    try:
+        task_id = int(callback.data.split(":")[1])
+        user_id = callback.from_user.id
 
-    task_id = int(task_id_str)
-    user_id = callback.from_user.id
+        success = task_manager.mark_task_done(task_id, user_id)
 
-    success = task_repo.mark_task_done(task_id, user_id)
+        if success:
+            # Rule 10: Provide immediate feedback on the new state
+            stats = HabitStats(user_id=user_id, task_manager=task_manager)
+            progress = stats.get_progress_stats()
+            
+            msg = (
+                f"✅ {hbold('Task Completed!')}\n"
+                f"Daily Progress: {progress['count']}/{progress['goal']} "
+                f"{'🎉' if progress['is_goal_reached'] else '🚀'}"
+            )
+            await callback.message.edit_text(msg, parse_mode="HTML")
+            await callback.answer("Stats Updated!")
+        else:
+            await callback.answer("❌ Task not found or already done.", show_alert=True)
+    except (ValueError, IndexError):
+        await callback.answer("❗ Data Corruption Error", show_alert=True)
 
-    if success:
-        await callback.answer("✅ Task marked as done!")
-        # Optionally edit the message to show the task is done or remove buttons
-        await callback.message.edit_reply_markup(None)
-    else:
-        await callback.answer("❌ Task not found or already done.", show_alert=True)
-
-
-@router.callback_query(lambda c: c.data and c.data.startswith("delete:"))
+@router.callback_query(F.data.startswith("delete:"))
 async def callback_delete_handler(callback: CallbackQuery):
-    # Extract task_id from callback data
-    task_id_str = callback.data.split(":")[1]
-    if not task_id_str.isdigit():
-        await callback.answer("Invalid task ID.", show_alert=True)
-        return
+    """Rule 5: Idempotent deletion handler."""
+    try:
+        task_id = int(callback.data.split(":")[1])
+        user_id = callback.from_user.id
 
-    task_id = int(task_id_str)
-    user_id = callback.from_user.id
-
-    success = task_repo.delete_task(task_id, user_id)
-
-    if success:
-        await callback.answer("🗑 Task deleted!")
-        # Optionally delete the message or update markup
-        await callback.message.delete()
-    else:
-        await callback.answer("❌ Task not found or could not be deleted.", show_alert=True)
+        if task_manager.delete_task(task_id, user_id):
+            await callback.message.delete()
+            await callback.answer("🗑 Task removed.")
+        else:
+            await callback.answer("❌ Task not found.", show_alert=True)
+    except Exception:
+        await callback.answer("❗ Error during deletion.", show_alert=True)
 
 # Love From Mister

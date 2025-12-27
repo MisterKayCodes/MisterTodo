@@ -7,5 +7,6 @@ class TaskCreation(StatesGroup):
     name = State()
     description = State()
     due_date = State()
+    priority = State()  # Rule 6: New state for priority selection
 
 # Love From Mister

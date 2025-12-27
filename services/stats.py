@@ -1,167 +1,107 @@
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Optional, Any
+import logging
 
-import datetime
-from typing import Optional, List, Dict
-from services.persistence import TaskRepository
-
+# Rule 10: Observability
+logger = logging.getLogger(__name__)
 
 class HabitStats:
-    def __init__(self, task_repo: TaskRepository):
-        self.task_repo = task_repo
+    """
+    Engine for calculating user productivity metrics, streaks, and goal progress.
+    Follows Rule 11 by separating core logic from the persistence layer.
+    """
 
-    def _parse_iso(self, iso_str: Optional[str]) -> Optional[datetime.datetime]:
+    def __init__(self, user_id: int, task_manager: Any, daily_goal: int = 5):
         """
-        Parse ISO datetime string to timezone-aware datetime object.
-        Handles formats: 2023-12-24T20:36:18.690192+00:00, 2023-12-24T20:36:18Z, etc.
+        Initialize the stats engine.
+        :param user_id: The Telegram ID of the user.
+        :param task_manager: Instance of TaskManager (Dependency Injection).
+        :param daily_goal: Target tasks per day. Must be > 0 (Rule 6).
         """
-        if not iso_str:
-            return None
+        self.user_id = user_id
+        self.task_manager = task_manager
         
+        # Rule 1: Enforce a valid system state - No zero/negative goals
+        if daily_goal <= 0:
+            logger.warning(f"Invalid daily_goal {daily_goal} for user {user_id}. Defaulting to 5.")
+            self.daily_goal = 5
+        else:
+            self.daily_goal = daily_goal
+
+    def _parse_date(self, date_str: str) -> datetime:
+        """
+        Parses ISO 8601 strings into timezone-aware UTC datetime objects.
+        :return: datetime object or datetime.min on failure (Rule 7).
+        """
         try:
-            # Try parsing directly (handles most ISO formats)
-            dt = datetime.datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
-            
-            # Ensure timezone awareness
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=datetime.timezone.utc)
-            
-            return dt
+            return datetime.fromisoformat(date_str)
         except (ValueError, TypeError) as e:
-            print(f"Warning: Could not parse datetime '{iso_str}': {e}")
-            return None
+            logger.error(f"Rule 12 Error: Failed to parse date '{date_str}': {e}")
+            return datetime.min.replace(tzinfo=timezone.utc)
 
-    def seven_day_consistency(self, user_id: int) -> float:
+    def get_recent_completions(self, days: int = 30) -> List[Any]:
         """
-        Percentage of tasks that were completed out of all tasks
-        that were *active* in the last 7 days.
-        
-        Active means: created within last 7 days AND not deleted.
-        Completed means: completed within last 7 days.
+        Fetches Task objects completed within the specified lookback period.
+        :param days: Number of days to look back.
+        :return: List of Task dataclass objects.
         """
-        tasks = self.task_repo.get_all_user_tasks(user_id)
+        all_completed = self.task_manager.get_completed_tasks(self.user_id, limit=500)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         
-        now = datetime.datetime.now(datetime.timezone.utc)
-        window_start = now - datetime.timedelta(days=7)
-        
-        active_tasks = []
-        for task in tasks:
-            created = self._parse_iso(task.get("created_at"))
-            
-            # Skip if no creation date or was created before window
-            if not created or created < window_start:
-                continue
-                
-            # Consider task active only if it was created in the window
-            # (regardless of completion status)
-            active_tasks.append(task)
-        
-        if not active_tasks:
-            return 0.0
-        
-        completed_count = 0
-        for task in active_tasks:
-            is_completed = task.get("is_completed")
-            completed_at = self._parse_iso(task.get("completed_at"))
-            
-            # Task is considered completed if:
-            # 1. is_completed == 1 (or True)
-            # 2. AND was completed within the window (or has no completion date)
-            if is_completed in (1, True):
-                if completed_at is None or completed_at >= window_start:
-                    completed_count += 1
-        
-        percentage = (completed_count / len(active_tasks)) * 100
-        return round(percentage, 1)
+        return [
+            t for t in all_completed 
+            if t.completed_at and self._parse_date(t.completed_at) >= cutoff
+        ]
 
-    def power_streak(self, user_id: int) -> int:
-        """Consecutive days with at least one completed task, ending today."""
-        tasks = self.task_repo.get_all_user_tasks(user_id)
+    def get_daily_counts(self, days: int = 30) -> Dict[str, int]:
+        """
+        Aggregates completion counts by calendar day.
+        :return: Dictionary mapping 'YYYY-MM-DD' -> completion_count.
+        """
+        tasks = self.get_recent_completions(days)
+        counts: Dict[str, int] = {}
+        for t in tasks:
+            date_key = self._parse_date(t.completed_at).date().isoformat()
+            counts[date_key] = counts.get(date_key, 0) + 1
+        return counts
+
+    def get_current_streak(self) -> int:
+        """
+        Calculates consecutive days of activity including today/yesterday.
+        :return: Current streak count as an integer.
+        """
+        counts = self.get_daily_counts(days=365)
+        today = datetime.now(timezone.utc).date()
+        yesterday = today - timedelta(days=1)
         
-        # Get unique dates when tasks were completed
-        completed_dates = set()
-        for task in tasks:
-            if task.get("is_completed") in (1, True):
-                completed_at = self._parse_iso(task.get("completed_at"))
-                if completed_at:
-                    completed_dates.add(completed_at.date())
-        
-        if not completed_dates:
+        # Rule 6: If no activity today AND yesterday, the streak is broken.
+        if counts.get(today.isoformat(), 0) == 0 and counts.get(yesterday.isoformat(), 0) == 0:
             return 0
-        
-        # Sort dates in descending order
-        sorted_dates = sorted(completed_dates, reverse=True)
-        
-        # Calculate the longest consecutive streak ending today or most recent completion
-        today = datetime.date.today()
-        max_streak = 0
-        current_streak = 0
-        
-        # Start from today and go backwards
-        check_date = today
-        while True:
-            if check_date in completed_dates:
-                current_streak += 1
-                max_streak = max(max_streak, current_streak)
-                check_date -= datetime.timedelta(days=1)
+
+        streak = 0
+        for i in range(0, 365):
+            day_str = (today - timedelta(days=i)).isoformat()
+            if counts.get(day_str, 0) > 0:
+                streak += 1
             else:
-                # Break if we find a gap
+                # Rule 4: If we haven't done a task TODAY yet, don't break the streak.
+                if i == 0: continue 
                 break
-        
-        return max_streak
+        return streak
 
-    def get_streak_details(self, user_id: int) -> Dict:
-        """Get detailed streak information."""
-        tasks = self.task_repo.get_all_user_tasks(user_id)
+    def get_progress_stats(self) -> Dict[str, Any]:
+        """
+        Calculates current day progress against the user's daily goal.
+        :return: Dict containing 'count', 'goal', 'percent' (float), and 'is_goal_reached' (bool).
+        """
+        today_str = datetime.now(timezone.utc).date().isoformat()
+        counts = self.get_daily_counts(days=1)
+        done_today = counts.get(today_str, 0)
         
-        completed_dates = set()
-        for task in tasks:
-            if task.get("is_completed") in (1, True):
-                completed_at = self._parse_iso(task.get("completed_at"))
-                if completed_at:
-                    completed_dates.add(completed_at.date())
-        
-        if not completed_dates:
-            return {"current_streak": 0, "last_completion": None, "all_dates": []}
-        
-        sorted_dates = sorted(completed_dates)
-        today = datetime.date.today()
-        yesterday = today - datetime.timedelta(days=1)
-        
-        current_streak = 0
-        check_date = today
-        
-        # Calculate current streak (consecutive days up to today)
-        while check_date in completed_dates:
-            current_streak += 1
-            check_date -= datetime.timedelta(days=1)
-        
+        # Rule 5: Idempotent and predictable result
         return {
-            "current_streak": current_streak,
-            "longest_streak": self._calculate_longest_streak(sorted_dates),
-            "last_completion": max(completed_dates) if completed_dates else None,
-            "completion_count": len(completed_dates),
-            "all_dates": sorted(completed_dates)
+            "count": done_today,
+            "goal": self.daily_goal,
+            "percent": min(done_today / self.daily_goal, 1.0),
+            "is_goal_reached": done_today >= self.daily_goal
         }
-    
-    def _calculate_longest_streak(self, sorted_dates: List[datetime.date]) -> int:
-        """Calculate the longest streak from sorted list of dates."""
-        if not sorted_dates:
-            return 0
-        
-        longest = 1
-        current = 1
-        
-        for i in range(1, len(sorted_dates)):
-            prev_date = sorted_dates[i - 1]
-            curr_date = sorted_dates[i]
-            
-            # Check if dates are consecutive
-            if (curr_date - prev_date).days == 1:
-                current += 1
-                longest = max(longest, current)
-            elif curr_date != prev_date:  # Same day doesn't break streak
-                current = 1
-        
-        return longest
-
-
-# Love From Mister 💛

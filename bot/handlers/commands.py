@@ -1,18 +1,22 @@
-from aiogram import Router, F
+from aiogram import Router, F, types
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
-from aiogram.filters.command import Command, CommandObject
+from aiogram.filters.command import Command
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.markdown import hbold, hitalic
 
 from bot.keyboards.reply import main_menu_kb, BTN_NEW_TASK, BTN_MY_LIST
-from bot.handlers.states import TaskCreation
-from services.persistence import TaskRepository
+from bot.handlers.states import TaskCreation  # Ensure TaskCreation has a 'priority' state
+
+# Rule 11: Only import the Manager, not the Repo
+from services.task_manager import TaskManager
+from services.stats import HabitStats
 
 router = Router()
-task_repo = TaskRepository()  # Persistent DB instance
+task_manager = TaskManager()  # Use the manager, not the repo (Rule 3)
 
-# Helper to build inline keyboard for a task
+# --- Keyboards ---
+
 def build_task_inline_kb(task_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -21,141 +25,111 @@ def build_task_inline_kb(task_id: int) -> InlineKeyboardMarkup:
         ]
     ])
 
-# /start command with main menu
+def build_priority_kb() -> InlineKeyboardMarkup:
+    """Rule 6: Explicit priority selection."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🟢 Low", callback_data="prio:Low"),
+            InlineKeyboardButton(text="🟡 Medium", callback_data="prio:Medium"),
+            InlineKeyboardButton(text="🔴 High", callback_data="prio:High")
+        ]
+    ])
+
+# --- Handlers ---
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
-    keyboard = main_menu_kb()
     await message.answer(
         f"Welcome to {hbold('Mister Todo')}!\n\nUse the buttons below to manage your tasks.",
-        reply_markup=keyboard,
+        reply_markup=main_menu_kb(),
         parse_mode="HTML"
     )
 
-# /newtask or BTN_NEW_TASK - start FSM for task creation
-@router.message(F.text == BTN_NEW_TASK)
-@router.message(Command("newtask"))
-async def cmd_newtask(message: Message, state: FSMContext):
-    await state.set_state(TaskCreation.name)
-    await message.answer(
-        "📝 Please enter the name of your new task:",
-        reply_markup=ReplyKeyboardRemove()
-    )
+@router.message(F.text == "📊 Habit Stats") # Assuming this BTN exists in your main_menu_kb
+@router.message(Command("habitstats"))
+async def cmd_habitstats(message: Message):
+    """Phase 3: The Habit Stats Summary UI."""
+    stats = HabitStats(user_id=message.from_user.id, task_manager=task_manager)
+    
+    streak = stats.get_current_streak()
+    progress = stats.get_progress_stats()
+    
+    # Rule 8: Visual Progress Bar (Boring but effective)
+    filled = int(progress['percent'] * 10)
+    bar = "🟩" * filled + "⬜" * (10 - filled)
 
-# /list or BTN_MY_LIST - show all active tasks with inline buttons
+    response = (
+        f"📊 {hbold('Your Productivity Stats')}\n\n"
+        f"🔥 Streak: {hbold(f'{streak} days')}\n"
+        f"🎯 Goal: {progress['count']}/{progress['goal']}\n"
+        f"Lvl: [{bar}] {int(progress['percent']*100)}%\n\n"
+        f"{'🌟 Goal Achieved!' if progress['is_goal_reached'] else 'Keep pushing! 🚀'}"
+    )
+    await message.answer(response, parse_mode="HTML")
+
 @router.message(F.text == BTN_MY_LIST)
 @router.message(Command("list"))
 async def cmd_list(message: Message):
-    tasks = task_repo.get_tasks(user_id=message.from_user.id)
+    # Rule 11: Using TaskManager returns a list of Task objects
+    tasks = task_manager.get_tasks(user_id=message.from_user.id)
 
     if not tasks:
-        await message.answer(
-            f"📋 Your task list is empty. Use {hbold(BTN_NEW_TASK)} to start.",
-            reply_markup=main_menu_kb(),
-            parse_mode="HTML"
-        )
+        await message.answer("📋 Your list is empty.", reply_markup=main_menu_kb())
         return
 
     for task in tasks:
+        # Now we can use task.priority and task.name safely
+        prio_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(task.priority, "⚪")
         text = (
-            f"🆔 {task['id']} - {hbold(task['name'])}\n"
-            f"📝 {hitalic(task['description'])}\n"
-            f"⏰ Due: {task['due_date']}"
+            f"{prio_emoji} {hbold(task.name)}\n"
+            f"📝 {hitalic(task.description or 'No description')}\n"
+            f"⏰ Due: {task.due_date}"
         )
-        kb = build_task_inline_kb(task['id'])
-        await message.answer(text, reply_markup=kb, parse_mode="HTML")
+        await message.answer(text, reply_markup=build_task_inline_kb(task.id), parse_mode="HTML")
 
-    # Optionally send main menu after the list
-    await message.answer("Use the buttons below to manage your tasks.", reply_markup=main_menu_kb())
+# --- Task Creation FSM with Priority ---
 
-# FSM for task creation flow
+@router.message(F.text == BTN_NEW_TASK)
+async def cmd_newtask(message: Message, state: FSMContext):
+    await state.set_state(TaskCreation.name)
+    await message.answer("📝 Enter task name:", reply_markup=ReplyKeyboardRemove())
+
 @router.message(TaskCreation.name)
-async def process_task_name(message: Message, state: FSMContext):
-    task_name = message.text.strip()
-    if not task_name:
-        await message.answer("❗ Task name cannot be empty:")
-        return
-
-    await state.update_data(name=task_name)
+async def process_name(message: Message, state: FSMContext):
+    await state.update_data(name=message.text.strip())
     await state.set_state(TaskCreation.description)
-    await message.answer(
-        f"✅ Name saved: {hbold(task_name)}\n\nNow, enter a description (or /skip):",
-        parse_mode="HTML"
-    )
+    await message.answer("📝 Enter description (or /skip):")
 
-@router.message(TaskCreation.description, Command("skip"))
 @router.message(TaskCreation.description)
-async def process_task_desc(message: Message, state: FSMContext):
-    if (message.text and message.text.startswith('/skip')) or message.text.lower() == "none":
-        description = "No description provided."
-    else:
-        description = message.text.strip()
-
-    await state.update_data(description=description)
+async def process_description(message: Message, state: FSMContext):
+    desc = message.text if message.text != "/skip" else "No description"
+    await state.update_data(description=desc)
     await state.set_state(TaskCreation.due_date)
-    await message.answer("📅 When is this due?\n(Type a date or /skip for 'No deadline'):")    
+    await message.answer("📅 Enter due date (or /skip):")
 
-@router.message(TaskCreation.due_date, Command("skip"))
 @router.message(TaskCreation.due_date)
-async def process_task_due_date(message: Message, state: FSMContext):
-    if (message.text and message.text.startswith('/skip')) or message.text.lower() == "none":
-        due_date = "No deadline"
-    else:
-        due_date = message.text.strip()
+async def process_due_date(message: Message, state: FSMContext):
+    due = message.text if message.text != "/skip" else "No deadline"
+    await state.update_data(due_date=due)
+    
+    # NEW STEP: Rule 6 - Explicit Priority Selection
+    await state.set_state(TaskCreation.priority)
+    await message.answer("⚖️ Select Task Priority:", reply_markup=build_priority_kb())
 
-    user_data = await state.get_data()
-
-    task_repo.add_task(
-        user_id=message.from_user.id,
-        name=user_data['name'],
-        description=user_data['description'],
-        due_date=due_date
+@router.callback_query(TaskCreation.priority, F.data.startswith("prio:"))
+async def process_priority(callback: CallbackQuery, state: FSMContext):
+    priority = callback.data.split(":")[1]
+    data = await state.get_data()
+    
+    # Finalize creation via Manager
+    task_manager.add_task(
+        user_id=callback.from_user.id,
+        name=data['name'],
+        description=data['description'],
+        due_date=data['due_date'],
+        priority=priority
     )
-
-    response = (
-        f"🎯 {hbold('Task Created Successfully!')}\n\n"
-        f"📌 {hbold(user_data['name'])}\n"
-        f"📝 {hitalic(user_data['description'])}\n"
-        f"⏰ Due: {due_date}"
-    )
-
-    await message.answer(response, parse_mode="HTML", reply_markup=main_menu_kb())
+    
+    await callback.message.edit_text(f"✅ Task {hbold(data['name'])} created with {priority} priority!")
+    await callback.message.answer("What's next?", reply_markup=main_menu_kb())
     await state.clear()
-
-# Callback handler for inline buttons
-@router.callback_query(F.data.startswith("done:"))
-async def callback_done(call: CallbackQuery):
-    task_id = int(call.data.split(":")[1])
-    user_id = call.from_user.id
-
-    success = task_repo.mark_task_done(task_id, user_id)
-    if success:
-        await call.answer("Task marked as done!", show_alert=False)
-        # Optionally edit the message to show it’s done
-        await call.message.edit_text(
-            f"{call.message.text}\n\n✅ Marked as done.",
-            reply_markup=None  # Remove buttons after done
-        )
-    else:
-        await call.answer("Failed to mark task as done or already done.", show_alert=True)
-
-# Callback handler for delete button
-@router.callback_query(F.data.startswith("delete:"))
-async def callback_delete(call: CallbackQuery):
-    task_id = int(call.data.split(":")[1])
-    user_id = call.from_user.id
-
-    success = task_repo.delete_task(task_id, user_id)
-    if success:
-        await call.answer("Task deleted!", show_alert=False)
-        # Delete the message containing the task
-        await call.message.delete()
-    else:
-        await call.answer("Failed to delete task.", show_alert=True)
-
-# Fallback handler for unknown text
-@router.message(F.text, StateFilter(None))
-async def fallback_message(message: Message):
-    await message.answer(
-        "I didn't quite catch that. Please use the buttons below to navigate.",
-        reply_markup=main_menu_kb()
-    )
